@@ -1,1 +1,47 @@
-https://colab.research.google.com/drive/1sGPuzKQ0j4DmezBzlnWrM095XyQwskZv#scrollTo=Qh4MEXkJjWQh
+!pip install langchain_groq
+!pip install groq
+
+import requests
+
+#using NEWS-API api key
+news_api="cd160509f6074ed6a456fdcba56003ca"
+question="latest update on microsoft"
+query="MSFT"
+def ans(query):
+    url=f"https://newsapi.org/v2/everything?q={query}&language=en&apiKey={news_api}"
+    response = requests.get(url).json()
+    #here response is stored as a dictionary
+    #now extracting articles from it till top 3 to reduce tokens for LLM model 
+    articless = response.get("articles",[])[:3]
+
+    context = ""
+    for a in articless:
+        context += f"- {a.get('title','')}: {a.get('description','')}\n"
+    return context
+    
+  
+print(ans(query))
+
+
+
+from langchain_groq import ChatGroq
+GROQ_API_KEY = "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"
+llm = ChatGroq(
+    model="llama-3.1-8b-instant",
+    temperature=0.2,
+    api_key=GROQ_API_KEY
+)
+def get_news(question):
+  news=ans(query)
+  prompt=f"""
+  question:{question}
+  resource:{news}
+  act as a Financial Advisor and answer whether to invest in it
+
+  """
+  response = llm.invoke(prompt)
+  return response.content
+  
+
+
+print(get_news(question))
