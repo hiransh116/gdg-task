@@ -1,1 +1,134 @@
-https://colab.research.google.com/drive/106KZOssh58sdZSqT4lYu7q0IPc4FC_iG#scrollTo=LNmqVOD8TQ4G
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+
+import yfinance as yf
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from sklearn.metrics import mean_squared_error
+import math
+
+end_date=datetime.today()-timedelta(days=7)
+start_date=end_date-timedelta(days=365*8)
+df=yf.download('AAPL',start=start_date,end=end_date)
+df1=df['Close']
+df1.tail()
+
+
+
+split=int(len(df1)*0.8)
+training_data=df1[:split]
+testing_data=df1[split:]
+scaler=MinMaxScaler(feature_range=(0,1))
+training_data=scaler.fit_transform(np.array(training_data).reshape(-1,1))
+testing_data=scaler.transform(np.array(testing_data).reshape(-1,1))
+print(training_data.shape)
+print(len(testing_data))
+
+
+#using ARIMA model_sar as time series forecasting to determine stock price for next 7 days
+data=df1
+data=pd.DataFrame(data)
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.arima.model import ARIMA
+model_ar = ARIMA( data,order=(2,2,1)).fit()
+predict_ar=model_ar.predict(start=len(data),end=len(data)+7)
+
+# Fit the model (order=(p,d,q), seasonal_order=(P,D,Q,s))
+model_sar = SARIMAX(data, order=(2,2,1), seasonal_order=(2,1,0,5)).fit()
+
+predict_sar=model_sar.predict(start=len(data),end=len(data)+7)
+
+predict_sar.index = range(len(predict_sar))
+predict_ar.index = range(len(predict_ar))
+
+
+
+X_train,y_train=[],[]
+#window approch
+
+for i in range(50,training_data.shape[0]):
+  X_train.append(training_data[i-50:i])
+  y_train.append(training_data[i,0])
+X_train,y_train=np.array(X_train),np.array(y_train)
+print(X_train.shape)
+print(y_train.shape)
+
+
+#LSTM stacked model
+model = Sequential()
+model.add(LSTM(64, return_sequences=True, input_shape=(50, 1)))
+model.add(LSTM(64, return_sequences=False))
+model.add(Dense(25)) 
+model.add(Dropout(0.2)) 
+model.add(Dense(1))
+
+
+model.summary()
+model.compile(optimizer='adam',
+              loss='mean_squared_error')
+model.fit(X_train, y_train, batch_size=1, epochs=30)
+
+
+#forecasting 7 days
+last_50_days=training_data[:50]
+last_50_days_scaled=scaler.transform(last_50_days.reshape(-1,1))
+dff=[]
+dff.append(last_50_days_scaled)
+dff=np.array(dff)
+dff.shape
+dff
+
+
+X_test,y_test=[],[]
+for i in range(50,len(testing_data)):
+  X_test.append(testing_data[i-50:i])
+  y_test.append(testing_data[i,0])
+X_test,y_test=np.array(X_test),np.array(y_test)
+print(X_test.shape)
+print(y_test.shape)
+
+
+predict=model.predict(X_test)
+predict=scaler.inverse_transform(predict)
+y_test=scaler.inverse_transform(y_test.reshape(-1,1))
+
+
+
+import matplotlib.pyplot as plt
+z=y_test.shape[0]
+fig,ax=plt.subplots(figsize=(12,6))
+
+predict1=pd.DataFrame(predict)
+xx=predict1.iloc[z-8:]
+y_test1=pd.DataFrame(y_test)
+yy=y_test1.iloc[z-8:]
+
+xx.index=range(len(xx))
+yy.index=range(len(yy))
+
+#i am doing this manually shifting
+xx=xx+yy.iloc[-7]-xx.iloc[-7]
+
+yy.columns=['Actual']
+xx.columns=['LSTM']
+xx.plot(ax=ax,color='Red',label='LSTM')
+yy.plot(ax=ax,color='Blue',label='Actual')
+predict_sar.plot(ax=ax,color='Green',label='SARIMAX')
+predict_ar.plot(ax=ax,color='pink',label='ARIMA')
+plt.legend()
+plt.show()
+
+
+
+from sklearn.metrics import mean_squared_error
+
+print(f"root_mean_squared_error_LSTM:{np.sqrt(mean_squared_error(yy,xx))}")
+print(f"root_mean_squared_error_SARIMAX:{np.sqrt(mean_squared_error(yy,predict_sar))}")
+print(f"root_mean_squared_error_ARIMA:{np.sqrt(mean_squared_error(yy,predict_ar))}")
